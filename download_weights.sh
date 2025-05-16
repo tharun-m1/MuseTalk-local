@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Run initial_script.sh before downloading weights
+source "$(dirname "$0")/initial_script.sh"
+
 # Set the checkpoints directory
 CheckpointsDir="models"
 
