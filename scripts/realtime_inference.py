@@ -64,7 +64,7 @@ class Avatar:
         preparation,
         vae,  # <-- add vae as argument
         extra_margin=10,
-        parsing_mode='jaw',
+        parsing_mode='raw',
         left_cheek_width=90,
         right_cheek_width=90,
     ):
