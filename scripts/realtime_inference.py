@@ -55,16 +55,23 @@ def osmakedirs(path_list):
 
 @torch.no_grad()
 class Avatar:
-    def __init__(self, avatar_id, video_path, bbox_shift, batch_size, preparation):
+    def __init__(
+        self,
+        avatar_id,
+        video_path,
+        bbox_shift,
+        batch_size,
+        preparation,
+        vae,  # <-- add vae as argument
+        extra_margin=10,
+        parsing_mode='jaw',
+        left_cheek_width=90,
+        right_cheek_width=90,
+    ):
         self.avatar_id = avatar_id
         self.video_path = video_path
         self.bbox_shift = bbox_shift
-        # 根据版本设置不同的基础路径
-        if args.version == "v15":
-            self.base_path = f"./results/{args.version}/avatars/{avatar_id}"
-        else:  # v1
-            self.base_path = f"./results/avatars/{avatar_id}"
-            
+        self.base_path = f"./results/v15/avatars/{avatar_id}"
         self.avatar_path = self.base_path
         self.full_imgs_path = f"{self.avatar_path}/full_imgs"
         self.coords_path = f"{self.avatar_path}/coords.pkl"
@@ -77,11 +84,16 @@ class Avatar:
             "avatar_id": avatar_id,
             "video_path": video_path,
             "bbox_shift": bbox_shift,
-            "version": args.version
+            "version": "v15"
         }
         self.preparation = preparation
         self.batch_size = batch_size
         self.idx = 0
+        self.extra_margin = extra_margin
+        self.parsing_mode = parsing_mode
+        self.left_cheek_width = left_cheek_width
+        self.right_cheek_width = right_cheek_width
+        self.vae = vae  # <-- store as instance variable
         self.init()
 
     def init(self):
@@ -165,20 +177,19 @@ class Avatar:
         coord_list, frame_list = get_landmark_and_bbox(input_img_list, self.bbox_shift)
         input_latent_list = []
         idx = -1
-        # maker if the bbox is not sufficient
         coord_placeholder = (0.0, 0.0, 0.0, 0.0)
         for bbox, frame in zip(coord_list, frame_list):
             idx = idx + 1
             if bbox == coord_placeholder:
                 continue
             x1, y1, x2, y2 = bbox
-            if args.version == "v15":
-                y2 = y2 + args.extra_margin
-                y2 = min(y2, frame.shape[0])
-                coord_list[idx] = [x1, y1, x2, y2]  # 更新coord_list中的bbox
+            # Always v15 logic
+            y2 = y2 + self.extra_margin
+            y2 = min(y2, frame.shape[0])
+            coord_list[idx] = [x1, y1, x2, y2]
             crop_frame = frame[y1:y2, x1:x2]
             resized_crop_frame = cv2.resize(crop_frame, (256, 256), interpolation=cv2.INTER_LANCZOS4)
-            latents = vae.get_latents_for_unet(resized_crop_frame)
+            latents = self.vae.get_latents_for_unet(resized_crop_frame)  # <-- use self.vae
             input_latent_list.append(latents)
 
         self.frame_list_cycle = frame_list + frame_list[::-1]
@@ -187,16 +198,18 @@ class Avatar:
         self.mask_coords_list_cycle = []
         self.mask_list_cycle = []
 
+        # Always v15 logic for face parsing
+        mode = self.parsing_mode
+        global fp
+        fp = FaceParsing(
+            left_cheek_width=self.left_cheek_width,
+            right_cheek_width=self.right_cheek_width
+        )
+
         for i, frame in enumerate(tqdm(self.frame_list_cycle)):
             cv2.imwrite(f"{self.full_imgs_path}/{str(i).zfill(8)}.png", frame)
-
             x1, y1, x2, y2 = self.coord_list_cycle[i]
-            if args.version == "v15":
-                mode = args.parsing_mode
-            else:
-                mode = "raw"
             mask, crop_box = get_image_prepare_material(frame, [x1, y1, x2, y2], fp=fp, mode=mode)
-
             cv2.imwrite(f"{self.mask_out_path}/{str(i).zfill(8)}.png", mask)
             self.mask_coords_list_cycle += [crop_box]
             self.mask_list_cycle.append(mask)
@@ -397,7 +410,8 @@ if __name__ == "__main__":
             video_path=video_path,
             bbox_shift=bbox_shift,
             batch_size=args.batch_size,
-            preparation=data_preparation)
+            preparation=data_preparation,
+            vae=vae)  # <-- pass vae here
 
         audio_clips = inference_config[avatar_id]["audio_clips"]
         for audio_num, audio_path in audio_clips.items():
