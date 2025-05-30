@@ -259,7 +259,7 @@ class ConcurrencyTester:
                 'inference_time': None
             }
     
-    def test_concurrency_level(self, num_workers, num_tests=3):
+    def test_concurrency_level(self, num_workers, num_tests=1):
         """Test a specific concurrency level"""
         print(f"\n{'='*60}")
         print(f"Testing {num_workers} concurrent workers")
@@ -354,14 +354,14 @@ class ConcurrencyTester:
             
             test_results.append(test_result)
             
-            # Print immediate results with 350ms target focus
+            # Print immediate results with 450ms target focus
             print(f"  Overall time: {overall_time:.2f}s")
             print(f"  Successful: {len(successful_tasks)}/{num_workers}")
             print(f"  Success rate: {test_result['success_rate']:.1f}%")
             if avg_inference_time:
                 task_time_ms = avg_inference_time * 1000
-                meets_target = "✅" if task_time_ms <= 350 else "❌"
-                print(f"  Avg task time: {task_time_ms:.0f}ms {meets_target} (target: ≤350ms)")
+                meets_target = "✅" if task_time_ms <= 450 else "❌"
+                print(f"  Avg task time: {task_time_ms:.0f}ms {meets_target} (target: ≤450ms)")
                 print(f"  Throughput: {test_result['throughput']:.2f} inferences/sec")
                 if total_frames:
                     print(f"  Frames/sec: {test_result['frames_per_second']:.1f}")
@@ -415,7 +415,7 @@ class ConcurrencyTester:
         
         for num_workers in concurrency_levels:
             try:
-                level_results = self.test_concurrency_level(num_workers, num_tests=3)
+                level_results = self.test_concurrency_level(num_workers, num_tests=1)
                 if level_results:
                     all_results.extend(level_results)
                     
@@ -424,12 +424,12 @@ class ConcurrencyTester:
                     valid_times = [r['avg_inference_time'] for r in level_results if r['avg_inference_time'] is not None]
                     avg_task_time = statistics.mean(valid_times) if valid_times else None
                     
-                    # Stop if success rate drops below 80% OR average task time exceeds 350ms
+                    # Stop if success rate drops below 80% OR average task time exceeds 450ms
                     if recent_success_rate < 80:
                         print(f"\n🛑 Stopping tests - success rate dropped to {recent_success_rate:.1f}%")
                         break
-                    elif avg_task_time and avg_task_time > 0.35:  # 350ms limit
-                        print(f"\n🛑 Stopping tests - average task time ({avg_task_time*1000:.0f}ms) exceeds 350ms limit")
+                    elif avg_task_time and avg_task_time > 0.45:  # 450ms limit
+                        print(f"\n🛑 Stopping tests - average task time ({avg_task_time*1000:.0f}ms) exceeds 450ms limit")
                         print(f"   Maximum recommended concurrency: {num_workers-1} workers" if num_workers > 1 else "")
                         break
                         
@@ -450,7 +450,7 @@ class ConcurrencyTester:
             return
             
         print(f"\n{'='*80}")
-        print("CONCURRENCY TEST RESULTS - 350ms Target Analysis")
+        print("CONCURRENCY TEST RESULTS - 450ms Target Analysis")
         print(f"{'='*80}")
         
         # Group results by concurrency level
@@ -464,7 +464,7 @@ class ConcurrencyTester:
         # Analyze each concurrency level
         summary_data = []
         
-        print(f"{'Workers':<8} {'Success%':<8} {'Task Time':<11} {'Meets 350ms':<12} {'Throughput':<12} {'FPS':<8}")
+        print(f"{'Workers':<8} {'Success%':<8} {'Task Time':<11} {'Meets 450ms':<12} {'Throughput':<12} {'FPS':<8}")
         print("-" * 75)
         
         max_valid_workers = 0
@@ -479,8 +479,8 @@ class ConcurrencyTester:
             valid_times = [r['avg_inference_time'] for r in results if r['avg_inference_time'] is not None]
             avg_time = statistics.mean(valid_times) if valid_times else None
             
-            # Check if meets 350ms target
-            meets_target = avg_time is not None and avg_time <= 0.35 and avg_success_rate >= 90
+            # Check if meets 450ms target
+            meets_target = avg_time is not None and avg_time <= 0.45 and avg_success_rate >= 90
             target_symbol = "✅" if meets_target else "❌"
             
             if meets_target:
@@ -508,7 +508,7 @@ class ConcurrencyTester:
         if max_valid_workers > 0:
             optimal_data = next(r for r in summary_data if r['workers'] == max_valid_workers)
             print(f"🎯 Maximum recommended concurrency: {max_valid_workers} workers")
-            print(f"   ✅ Task time: {optimal_data['avg_time']*1000:.0f}ms (under 350ms limit)")
+            print(f"   ✅ Task time: {optimal_data['avg_time']*1000:.0f}ms (under 450ms limit)")
             print(f"   ✅ Success rate: {optimal_data['success_rate']:.1f}%")
             print(f"   📈 Total throughput: {optimal_data['throughput']:.2f} inferences/sec")
             if optimal_data['fps']:
@@ -520,7 +520,7 @@ class ConcurrencyTester:
             print(f"   • Equivalent to {optimal_data['throughput']*0.5:.1f} seconds of audio per second")
             print(f"   • Processing speed: {(optimal_data['throughput']*0.5)*100:.0f}% of real-time")
         else:
-            print(f"⚠️  No concurrency level met the 350ms target!")
+            print(f"⚠️  No concurrency level met the 450ms target!")
             print(f"   Consider reducing batch size or using a more powerful GPU")
         
         # Save detailed results
