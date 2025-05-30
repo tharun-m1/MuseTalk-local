@@ -218,7 +218,7 @@ async def init_models(app):
         video_path="./data/video/dummy.mp4",
         bbox_shift=BBOX_SHIFT,
         batch_size=BATCH_SIZE,
-        preparation=False,
+        preparation=True,
         vae=vae
     )
     print("Models loaded successfully!")
