@@ -1,0 +1,5 @@
+# Additional requirements for concurrency testing
+# Install with: pip install -r requirements_concurrency.txt
+
+psutil>=5.9.0          # For system resource monitoring
+GPUtil>=1.4.0          # For GPU monitoring (optional)
