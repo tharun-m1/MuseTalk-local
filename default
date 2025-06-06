@@ -1,7 +1,7 @@
 server {
     listen 80 ;
     listen [::]:80 ;
-    server_name lipsync.vocallabs.ai;
+    server_name lipsync.travelr.club;
     error_log  /var/log/nginx/error.log;
     access_log /var/log/nginx/access.log;
 

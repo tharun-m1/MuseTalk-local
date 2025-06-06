@@ -47,6 +47,14 @@ total_requests_received = 0
 # WebSocket connections
 active_websockets = []
 
+# Frame caching - ONLY addition to original
+CACHE_DIR = "cached_frames"
+MAX_CHUNKS_TO_CACHE = 20
+current_chunk_count = 0
+cached_chunks = {}  # {chunk_id: {"frames": [...], "audio": audio_data}}
+cached_audio_data = {}  # {chunk_id: audio_bytes}
+current_playback_index = 0  # For sequential playback
+
 def extract_uuid_from_audio(audio_bytes):
     """Extract UUID from first 16 bytes of the audio data."""
     if len(audio_bytes) < 16:
@@ -218,11 +226,94 @@ def generate_frames_streaming(audio_path):
     
     return full_frames
 
+# ONLY caching additions
+def save_chunk_frames_and_audio(chunk_id, frames, audio_data):
+    """Save frames and audio for a chunk to disk cache."""
+    chunk_dir = os.path.join(CACHE_DIR, f"chunk_{chunk_id:03d}")
+    os.makedirs(chunk_dir, exist_ok=True)
+    
+    # Save frames
+    for idx, frame in enumerate(frames):
+        frame_path = os.path.join(chunk_dir, f"frame_{idx:03d}.jpg")
+        cv2.imwrite(frame_path, frame)
+    
+    # Save audio data
+    audio_path = os.path.join(chunk_dir, "audio.wav")
+    with open(audio_path, "wb") as f:
+        f.write(audio_data)
+    
+    print(f"💾 Cached {len(frames)} frames + audio for chunk {chunk_id}")
+
+def load_chunk_frames_and_audio(chunk_id):
+    """Load frames and audio for a chunk from disk cache."""
+    chunk_dir = os.path.join(CACHE_DIR, f"chunk_{chunk_id:03d}")
+    
+    if not os.path.exists(chunk_dir):
+        return None, None
+    
+    # Load frames
+    frame_files = sorted([f for f in os.listdir(chunk_dir) if f.startswith("frame_") and f.endswith(".jpg")])
+    frames = []
+    
+    for frame_file in frame_files:
+        frame_path = os.path.join(chunk_dir, frame_file)
+        frame = cv2.imread(frame_path)
+        if frame is not None:
+            frames.append(frame)
+    
+    # Load audio data
+    audio_path = os.path.join(chunk_dir, "audio.wav")
+    audio_data = None
+    if os.path.exists(audio_path):
+        with open(audio_path, "rb") as f:
+            audio_data = f.read()
+    
+    return frames if frames else None, audio_data
+
+async def stream_cached_chunk_response(channel, uuid_str):
+    """Stream a cached chunk (frames + audio) in sequential order - this replaces voice AI response."""
+    global cached_chunks, cached_audio_data, current_playback_index
+    
+    if len(cached_chunks) < MAX_CHUNKS_TO_CACHE:
+        return False  # Not enough cached chunks yet
+    
+    # Use current playback index (sequential order: 0, 1, 2, ..., 19, 0, 1, 2, ...)
+    chunk_id = current_playback_index
+    frames = cached_chunks[chunk_id]
+    audio_data = cached_audio_data.get(chunk_id)
+    
+    print(f"🚀 Using cached chunk {chunk_id} as response ({len(frames)} frames) - sequential playback")
+    
+    # Stream the cached frames (same as original streaming)
+    for idx, frame in enumerate(frames):
+        is_final = (idx == len(frames) - 1)
+        success = await send_frame_via_webrtc_async(channel, frame, uuid_str, idx, is_final)
+        if not success:
+            print(f"⚠️ Failed to send cached frame {idx}, continuing...")
+        
+        # Small delay to avoid overwhelming the channel
+        if idx < len(frames) - 1:
+            await asyncio.sleep(0.01)
+    
+    print(f"✅ Successfully streamed {len(frames)} cached frames via WebRTC")
+    
+    # Send cached audio via WebSocket
+    if active_websockets and audio_data:
+        audio_b64 = base64.b64encode(audio_data).decode('utf-8')
+        await send_audio_via_websocket(audio_b64, uuid_str)
+        print(f"✅ Sent cached audio for chunk {chunk_id} via WebSocket")
+    
+    # Move to next chunk in sequence (loop back to 0 after 19)
+    current_playback_index = (current_playback_index + 1) % MAX_CHUNKS_TO_CACHE
+    print(f"📍 Next playback will use chunk {current_playback_index}")
+    
+    return True
+
 async def process_audio_and_respond(msg, channel):
     """
     Process audio data from WebRTC and generate lip-sync frames with streaming.
     """
-    global active_jobs
+    global active_jobs, current_chunk_count, cached_chunks
     try:
         # Get timestamp for logging
         ist = timezone('Asia/Kolkata')
@@ -250,6 +341,32 @@ async def process_audio_and_respond(msg, channel):
         
         print(f"Audio data size after UUID extraction: {len(audio_data)} bytes")
         
+        # FIRST CHECK: Do we have enough cached chunks? If yes, ignore incoming audio and use cached response
+        if len(cached_chunks) >= MAX_CHUNKS_TO_CACHE:
+            print(f"🚀 Using cached response - ignoring incoming audio, no voice AI needed")
+            await stream_cached_chunk_response(channel, uuid_str)
+            return
+        
+        # Load cached chunks into memory if not already loaded (on server restart)
+        if not cached_chunks and current_chunk_count == 0:
+            print("🔄 Loading existing cached chunks from disk...")
+            for i in range(MAX_CHUNKS_TO_CACHE):
+                existing_frames, existing_audio = load_chunk_frames_and_audio(i)
+                if existing_frames and existing_audio:
+                    cached_chunks[i] = existing_frames
+                    cached_audio_data[i] = existing_audio
+                    current_chunk_count = max(current_chunk_count, i + 1)
+            
+            if cached_chunks:
+                print(f"✅ Loaded {len(cached_chunks)} cached chunks from disk")
+                # Check again if we have enough after loading
+                if len(cached_chunks) >= MAX_CHUNKS_TO_CACHE:
+                    await stream_cached_chunk_response(channel, uuid_str)
+                    return
+        
+        # GENERATE NEW FRAMES (only for first MAX_CHUNKS_TO_CACHE requests)
+        print(f"🔥 Generating new chunk {current_chunk_count + 1}/{MAX_CHUNKS_TO_CACHE}")
+        
         # Create buffer and convert to proper format for processing
         try:
             mp3_buf = io.BytesIO(audio_data)
@@ -275,16 +392,19 @@ async def process_audio_and_respond(msg, channel):
             f.write(wav_bytes)
         print(f"Saved audio to temporary file: {audio_path}")
 
-        # Generate lip-sync frames
+        # Generate lip-sync frames (original logic)
         async with generate_sema:
             print(f"Starting streaming frame generation...")
             frames = await asyncio.get_running_loop().run_in_executor(
                 gpu_executor, generate_frames_streaming, audio_path
             )
         
+        if not frames:
+            raise Exception("No frames available")
+        
         print(f"✅ Generated {len(frames)} frames, now streaming via WebRTC...")
         
-        # Send each frame individually via WebRTC
+        # Send each frame individually via WebRTC (original streaming logic)
         for idx, frame in enumerate(frames):
             is_final = (idx == len(frames) - 1)
             success = await send_frame_via_webrtc_async(channel, frame, uuid_str, idx, is_final)
@@ -297,13 +417,22 @@ async def process_audio_and_respond(msg, channel):
         
         print(f"✅ Successfully streamed {len(frames)} frames via WebRTC")
         
+        # Cache the generated frames AND audio for future use
+        cached_chunks[current_chunk_count] = frames
+        cached_audio_data[current_chunk_count] = wav_bytes  # Cache the processed audio
+        await asyncio.get_running_loop().run_in_executor(
+            gpu_executor, save_chunk_frames_and_audio, current_chunk_count, frames, wav_bytes
+        )
+        current_chunk_count += 1
+        print(f"✅ Generated and cached chunk {current_chunk_count}/{MAX_CHUNKS_TO_CACHE}")
+        
+        # Clean up temporary file
         try:
-            # Clean up temporary file
             os.remove(audio_path)
         except Exception as cleanup_error:
             print(f"Warning: Failed to remove temporary file {audio_path}: {cleanup_error}")
 
-        # Send audio separately through WebSocket if needed
+        # Send audio separately through WebSocket if needed (original logic)
         if active_websockets:
             # Convert audio to base64 for WebSocket transmission
             audio_b64 = base64.b64encode(audio_data).decode('utf-8')
@@ -316,13 +445,13 @@ async def process_audio_and_respond(msg, channel):
         # Send error response if possible
         if channel and channel.readyState == "open":
             try:
-                # Send error as a single frame with chunk_id = -1
+                # Send error as a single frame with chunk_id = 0
                 error_frame = np.zeros((360, 640, 3), dtype=np.uint8)  # Empty frame
                 error_uuid = uuid_str if 'uuid_str' in locals() else str(uuid.uuid4())
                 
                 await send_frame_via_webrtc_async(
-                    channel, error_frame, error_uuid, -1, True, 
-                    status="failed", error_message=str(e)
+                    channel, error_frame, error_uuid, 0, True, 
+                    status="failed", error_message=str(e)[:99]
                 )
                 print(f"Sent error response through WebRTC")
             except Exception as send_err:
@@ -352,7 +481,7 @@ async def init_models(app):
         video_path="./data/video/dummy.mp4",
         bbox_shift=BBOX_SHIFT,
         batch_size=BATCH_SIZE,
-        preparation=True,
+        preparation=False,
         vae=vae
     )
     print("Models loaded successfully!")
@@ -514,6 +643,7 @@ def cleanup():
 if __name__ == "__main__":
     try:
         app = setup_application()
+        print(f"🚀 Starting Dummy Server - will cache first {MAX_CHUNKS_TO_CACHE} chunks")
         web.run_app(app, host="0.0.0.0", port=8080)
     finally:
         cleanup()
