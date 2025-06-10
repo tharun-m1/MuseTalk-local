@@ -1,7 +1,7 @@
-# conda create -n MuseTalkv15 python==3.10
-# conda activate MuseTalkv15
+# conda create -n musetalkv15 python==3.10
+# conda activate musetalkv15
 
-# pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
+pip install torch==2.0.1 torchvision==0.15.2 torchaudio==2.0.2 --index-url https://download.pytorch.org/whl/cu118
 
 pip install -r requirements.txt
 
