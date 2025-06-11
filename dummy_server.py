@@ -36,7 +36,7 @@ active_websockets = []
 
 # Frame caching
 CACHE_DIR = "cached_frames"
-MAX_CHUNKS_TO_CACHE = 20  # Set to 17 since chunk 4 is skipped
+MAX_CHUNKS_TO_CACHE = 19  # Set to 17 since chunk 4 is skipped
 current_chunk_count = 0
 cached_chunks = {}  # {chunk_id: [frames]}
 cached_audio_data = {}  # {chunk_id: audio_bytes}
