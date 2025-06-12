@@ -26,7 +26,7 @@ from scripts.realtime_inference import Avatar
 from musetalk.utils.audio_processor import AudioProcessor
 
 # Global constants and state
-AVATAR_ID = "pradeep"
+AVATAR_ID = "lucy"
 BBOX_SHIFT = 12
 BATCH_SIZE = 9
 FPS = 12
@@ -105,7 +105,7 @@ def package_single_frame_for_webrtc(frame, uuid_str, chunk_id, is_final, status=
     resized_frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
     
     # Convert frame to JPEG
-    _, buf = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
     frame_bytes = buf.tobytes()
     
     # Add frame size (4 bytes)
@@ -349,7 +349,7 @@ async def init_models(app):
     whisper.requires_grad_(False)
     avatar_model = Avatar(
         avatar_id=AVATAR_ID,
-        video_path="./data/video/dummy.mp4",
+        video_path="./data/video/shreyan_new.mp4",
         bbox_shift=BBOX_SHIFT,
         batch_size=BATCH_SIZE,
         preparation=True,

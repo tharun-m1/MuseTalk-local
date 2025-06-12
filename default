@@ -1,7 +1,7 @@
 server {
     listen 80 ;
     listen [::]:80 ;
-    server_name 164.52.198.195;
+    server_name lipsync.vocallabs.ai;
     error_log  /var/log/nginx/error.log;
     access_log /var/log/nginx/access.log;
 
