@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import time
 
-def extract_frames_from_video(video_path, output_folder, target_fps=12, resize_to=(640, 360), jpeg_quality=85, frames_per_chunk=5):
+def extract_frames_from_video(video_path, output_folder, target_fps=12, jpeg_quality=85, frames_per_chunk=5):
     """
     Extract frames from video and save them in the format expected by dummy_server.py
     
@@ -37,7 +37,7 @@ def extract_frames_from_video(video_path, output_folder, target_fps=12, resize_t
     print(f"   - Total frames: {total_frames}")
     print(f"   - Duration: {duration:.2f} seconds")
     print(f"   - Target FPS: {target_fps}")
-    print(f"   - Output size: {resize_to[0]}x{resize_to[1]}")
+    # print(f"   - Output size: {resize_to[0]}x{resize_to[1]}")
     print(f"   - Frames per chunk: {frames_per_chunk}")
     
     # Calculate frame sampling interval
@@ -71,7 +71,7 @@ def extract_frames_from_video(video_path, output_folder, target_fps=12, resize_t
             os.makedirs(chunk_dir, exist_ok=True)
             
             # Resize frame to match WebRTC response format
-            resized_frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
+            # resized_frame = cv2.resize(frame, resize_to, interpolation=cv2.INTER_AREA)
             
             # Generate filename with zero-padded numbering
             frame_filename = f"frame_{frame_in_chunk:03d}.jpg"
@@ -80,7 +80,7 @@ def extract_frames_from_video(video_path, output_folder, target_fps=12, resize_t
             # Save frame with specified JPEG quality
             success = cv2.imwrite(
                 frame_path, 
-                resized_frame, 
+                frame, 
                 [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
             )
             
@@ -174,7 +174,6 @@ def main():
         video_path=args.video_path,
         output_folder=args.output,
         target_fps=args.fps,
-        resize_to=(args.width, args.height),
         jpeg_quality=args.quality,
         frames_per_chunk=args.frames_per_chunk
     )
