@@ -42,6 +42,9 @@ cached_chunks = {}  # {chunk_id: [frames]}
 cached_audio_data = {}  # {chunk_id: audio_bytes}
 current_playback_index = 1  # Start from chunk_001
 
+# NEW: WebRTC send lock to prevent frame interleaving
+webrtc_send_lock = asyncio.Lock()
+
 def extract_uuid_from_audio(audio_bytes):
     """Extract UUID from first 16 bytes of the audio data."""
     if len(audio_bytes) < 16:
@@ -66,9 +69,9 @@ def package_single_frame_for_webrtc(frame, uuid_str, chunk_id, is_final, status=
     payload.extend(error_bytes)
     payload.extend(chunk_id.to_bytes(4, byteorder='big'))
     payload.extend((1 if is_final else 0).to_bytes(1, byteorder='big'))
-    # target_size = (640, 360)
-    # resized_frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
-    _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 100])
+    target_size = (640, 360)
+    resized_frame = cv2.resize(frame, target_size, interpolation=cv2.INTER_AREA)
+    _, buf = cv2.imencode('.jpg', resized_frame, [cv2.IMWRITE_JPEG_QUALITY, 100])
     frame_bytes = buf.tobytes()
     payload.extend(len(frame_bytes).to_bytes(4, byteorder='big'))
     payload.extend(frame_bytes)
@@ -107,9 +110,11 @@ def load_chunk_frames_and_audio(chunk_id):
 
 async def stream_cached_chunk_response(channel, uuid_str):
     global cached_chunks, cached_audio_data, current_playback_index
+    
     if len(cached_chunks) < MAX_CHUNKS_TO_CACHE:
         print("❌ Not enough cached chunks to serve.")
         return False
+    
     chunk_id = current_playback_index
     # Skip chunk_id 4 if it is not present in cached_chunks
     while chunk_id == 4 or chunk_id not in cached_chunks:
@@ -120,21 +125,32 @@ async def stream_cached_chunk_response(channel, uuid_str):
         if chunk_id == current_playback_index:
             print("❌ No valid cached chunks to serve.")
             return False
+    
     frames = cached_chunks[chunk_id]
     audio_data = cached_audio_data.get(chunk_id)
     print(f"🚀 Using cached chunk {chunk_id} as response ({len(frames)} frames) - sequential playback")
-    for idx, frame in enumerate(frames):
-        is_final = (idx == len(frames) - 1)
-        success = await send_frame_via_webrtc_async(channel, frame, uuid_str, idx, is_final)
-        if not success:
-            print(f"⚠️ Failed to send cached frame {idx}, continuing...")
-        if idx < len(frames) - 1:
-            await asyncio.sleep(0.01)
-    print(f"✅ Successfully streamed {len(frames)} cached frames via WebRTC")
+    
+    # FIXED: Use WebRTC send lock to prevent frame interleaving
+    async with webrtc_send_lock:
+        print(f"🔒 LOCKED: Starting atomic frame transmission for UUID {uuid_str[:8]}")
+        
+        for idx, frame in enumerate(frames):
+            is_final = (idx == len(frames) - 1)
+            success = await send_frame_via_webrtc_async(channel, frame, uuid_str, idx, is_final)
+            if not success:
+                print(f"⚠️ Failed to send frame {idx}, but continuing...")
+            if idx < len(frames) - 1:
+                await asyncio.sleep(0.01)  # Small delay between frames
+        
+        print(f"🔓 UNLOCKED: Completed atomic transmission for UUID {uuid_str[:8]}")
+    
+    print(f"✅ Successfully streamed {len(frames)} frames via WebRTC (atomic)")
+    
     if active_websockets and audio_data:
         audio_b64 = base64.b64encode(audio_data).decode('utf-8')
         await send_audio_via_websocket(audio_b64, uuid_str)
         print(f"✅ Sent cached audio for chunk {chunk_id} via WebSocket")
+    
     # Only increment within the valid chunk range (1 to MAX_CHUNKS_TO_CACHE)
     current_playback_index = chunk_id + 1
     if current_playback_index > MAX_CHUNKS_TO_CACHE:
@@ -335,7 +351,7 @@ def cleanup():
 if __name__ == "__main__":
     try:
         app = setup_application()
-        print(f"🚀 Starting Dummy Server (cache-only mode) - will serve only cached chunks")
+        print(f"🚀 Starting Dummy Server (cache-only mode) with WebRTC send lock - will serve only cached chunks")
         web.run_app(app, host="0.0.0.0", port=8080)
     finally:
         cleanup()
